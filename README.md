@@ -1,14 +1,20 @@
 ```
-usage: main.py [-h] [--height HEIGHT] url
+usage: main.py [-h] [--height HEIGHT] [-d [DISKS ...]] [--image_temp_dir IMAGE_TEMP_DIR] [--concurrent_downloads CONCURRENT_DOWNLOADS] url
 
-Parse URL for disc ids and movie ID.
+Upload caps-a-holic comparison to slow.pics.
 
 positional arguments:
-  url              URL to parse
+  url                   caps-a-holic URL
 
 options:
-  -h, --help       show this help message and exit
-  --height HEIGHT  Height override
+  -h, --help            show this help message and exit
+  --height HEIGHT       Height override
+  -d [DISKS ...], --disks [DISKS ...]
+                        Additional disks
+  --image_temp_dir IMAGE_TEMP_DIR
+                        Temporary directory for images
+  --concurrent_downloads CONCURRENT_DOWNLOADS
+                        Number of concurrent downloads
 ```
 
 #### DEMO: https://slow.pics/c/zXvlytMN
