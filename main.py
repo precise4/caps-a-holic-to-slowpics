@@ -10,16 +10,40 @@ from lxml import html
 from urllib.parse import urlparse, parse_qs
 from requests_toolbelt import MultipartEncoder
 import requests
+import argparse
+import urllib.parse
 
-# Movie ID eg:3937
-c = 3937 
-# Override height 
-# eg:(480, 1080, 2160...) 0 to disable
-# uses max feame height by default
-h = 480
-# Specify disc ids (integers) uses all available by default if left empty
-# eg: ['9770', '9781']
-selected_discs = ['9770', '9781']
+def parse_url(url):
+    parsed_url = urllib.parse.urlparse(url)
+    query_params = urllib.parse.parse_qs(parsed_url.query)
+
+    # Extract parameters with default values
+    d1 = query_params.get('d1', [''])[1]
+    d2 = query_params.get('d2', [''])[0]
+    c = query_params.get('c', [''])[0]
+
+    # Prepare the output
+    selected_discs = [d1, d2] if d1 or d2 else []
+    c = c if c else None
+
+    return selected_discs, c
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Utility script to upload https://caps-a-holic.com/ comparison to https://slow.pics/')
+    parser.add_argument('url', type=str, help='caps-a-holic URL')
+    parser.add_argument('--height', type=int, default=0, help='Height override')
+    args = parser.parse_args()
+
+    selected_discs, c = parse_url(args.url)
+    h = args.heigh
+
+    #print(f"# Specify disc ids (integers) uses all available by default if left empty")
+    #print(f"# eg: ['9770', '9781']")
+    print(f"Selected Discs: {selected_discs}")
+
+    if c is not None:
+        #print(f"# Movie ID eg:3937")
+        print(f"Movie ID: {c}")
 
 image_temp_dir = 'img_tmp'
 concurrent_downloads = 10
@@ -154,7 +178,7 @@ async def slowpics_comparison(
             post_data[f'comparisons[{i}].images[{j}].file'] = (
                 f"{imgid}.png", f, 'image/png'
             )
-        
+
     with requests.Session() as client:
         client.get("https://slow.pics/api/comparison")
         files = MultipartEncoder(post_data)
@@ -165,8 +189,8 @@ async def slowpics_comparison(
             "X-XSRF-TOKEN": client.cookies.get_dict()["XSRF-TOKEN"]
         }
         response = client.post(
-            "https://slow.pics/api/comparison", 
-            data=files, headers=headers, verify=False)
+            "https://slow.pics/api/comparison",
+            data=files, headers=headers)
         print(f'https://slow.pics/c/{response.text}')
 
     for f in open_files:
@@ -187,7 +211,7 @@ async def start_process():
         if not d_id in info: continue
         disc_data.append(d_id)
         height = max(height, int(info[d_id][1].rsplit('x', maxsplit=1)[-1]))
-    
+
     if h: height = h
     print(f'Height: {height}')
     images = await gather_images(disc_data)
