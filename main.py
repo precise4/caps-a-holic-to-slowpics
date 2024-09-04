@@ -11,6 +11,11 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder
 import requests
 import argparse
 import urllib.parse
+from PIL import Image
+import shutil
+from tqdm import tqdm
+from tqdm.asyncio import tqdm_asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 def parse_url(url):
     parsed_url = urllib.parse.urlparse(url)
@@ -21,12 +26,6 @@ def parse_url(url):
     selected_disks = [d1, d2] if d1 or d2 else []
     return selected_disks, c if c else None
 
-async def gather_pooled(n, *coros):
-    sem = asyncio.Semaphore(n)
-    async def sem_coro(coro):
-        async with sem:
-            return await coro
-    return await asyncio.gather(*[sem_coro(c) for c in coros], return_exceptions=True)
 
 async def disk_info(c: int, image_temp_dir: str):
     url = f'https://caps-a-holic.com/c_list.php?c={c}'
@@ -75,7 +74,7 @@ async def gather_images(disk_ids, c: int):
     results = await asyncio.gather(*tasks)
     return dict(results)
 
-async def fetch_file(id, url, image_temp_dir: str):
+async def fetch_file(id, url, image_temp_dir: str, pbar):
     fname = f'{id}.png'
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     conn = aiohttp.TCPConnector(ssl=ssl_context)
@@ -86,14 +85,18 @@ async def fetch_file(id, url, image_temp_dir: str):
             data = await resp.read()
     async with aiofiles.open(os.path.join(image_temp_dir, fname), "wb") as outfile:
         await outfile.write(data)
+    pbar.update(1)
 
-async def grab_images(images: dict, height, image_temp_dir: str, concurrent_downloads: int):
+async def grab_images(images: dict, height, image_temp_dir: str):
     os.makedirs(image_temp_dir, exist_ok=True)
-    tasks = [
-        fetch_file(img_id, f'https://caps-a-holic.com/c_image.php?max_height={height}&s={img_id}&a=0&x=0&y=0&l=1', image_temp_dir)
-        for img_ids in images.values() for img_id in img_ids
-    ]
-    await gather_pooled(concurrent_downloads, *tasks)
+    total_images = sum(len(img_ids) for img_ids in images.values())
+    with tqdm_asyncio(total=total_images, desc="Downloading images") as pbar:
+        tasks = [
+            fetch_file(img_id, f'https://caps-a-holic.com/c_image.php?max_height={height}&s={img_id}&a=0&y=0&l=1&x=0', image_temp_dir, pbar)
+            for img_ids in images.values() for img_id in img_ids
+        ]
+        await asyncio.gather(*tasks)
+
 
 async def slowpics_comparison(comp_title, disk_info, image_data, img_dir: str):
     post_data = {
@@ -108,9 +111,9 @@ async def slowpics_comparison(comp_title, disk_info, image_data, img_dir: str):
         for j, imgid in enumerate(item):
             disk = disk_info[list(image_data.keys())[j]][0]
             post_data[f'comparisons[{i}].images[{j}].name'] = (None, f"{disk} | {imgid}")
-            f = open(os.path.join(img_dir, f"{imgid}.png"), 'rb')
+            f = open(os.path.join(img_dir, f"{imgid}.webp"), 'rb')
             open_files.append(f)
-            post_data[f'comparisons[{i}].images[{j}].file'] = (f"{imgid}.png", f, 'image/png')
+            post_data[f'comparisons[{i}].images[{j}].file'] = (f"{imgid}.webp", f, 'image/webp')
 
     with requests.Session() as client:
         client.get("https://slow.pics/api/comparison")
@@ -126,7 +129,7 @@ async def slowpics_comparison(comp_title, disk_info, image_data, img_dir: str):
     for f in open_files:
         f.close()
 
-async def start_process(selected_disks, c, height, image_temp_dir, concurrent_downloads):
+async def start_process(selected_disks, c, height, image_temp_dir):
     image_temp_dir = os.path.abspath(image_temp_dir)
     info, main_title = await disk_info(c, image_temp_dir)
     disk_data = []
@@ -140,9 +143,24 @@ async def start_process(selected_disks, c, height, image_temp_dir, concurrent_do
         height = max(height, int(info[d_id][1].rsplit('x', 1)[-1]))
     height = height if height else height
     print(f'Height: {height}')
+    print("Gathering Images")
     images = await gather_images(disk_data, c)
-    await grab_images(images, height, image_temp_dir, concurrent_downloads)
+    await grab_images(images, height, image_temp_dir)
+    await transcode(images, image_temp_dir)
+    print("Uploading")
     await slowpics_comparison(main_title, info, images, image_temp_dir)
+    shutil.rmtree(image_temp_dir)
+
+async def transcode(images, image_temp_dir):
+    def convert_to_webp(img_id):
+        infile = os.path.join(image_temp_dir, f'{img_id}.png')
+        outfile = os.path.splitext(infile)[0] + '.webp'
+        with Image.open(infile).convert("RGB") as im:
+            im.save(outfile, "webp", lossless=True)
+    with ThreadPoolExecutor() as executor:
+        img_ids = [img_id for img_ids in images.values() for img_id in img_ids]
+        list(tqdm(executor.map(convert_to_webp, img_ids), total=len(img_ids), desc="Processing images"))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Upload caps-a-holic comparison to slow.pics.')
@@ -150,7 +168,6 @@ if __name__ == "__main__":
     parser.add_argument('--height', type=int, default=0, help='Height override')
     parser.add_argument('-d', '--disks', nargs='*', type=str, help='Additional disks', default=[])
     parser.add_argument('--image_temp_dir', type=str, default='img_tmp', help='Temporary directory for images')
-    parser.add_argument('--concurrent_downloads', type=int, default=10, help='Number of concurrent downloads')
     args = parser.parse_args()
     selected_disks, c = parse_url(args.url)
     height = args.height
@@ -158,4 +175,4 @@ if __name__ == "__main__":
     print(f"Selected disks: {selected_disks}")
     if c is not None:
         print(f"Movie ID: {c}")
-    asyncio.run(start_process(selected_disks, c, height, args.image_temp_dir, args.concurrent_downloads))
+    asyncio.run(start_process(selected_disks, c, height, args.image_temp_dir))
