@@ -1,5 +1,5 @@
 ```
-usage: main.py [-h] [--height HEIGHT] [-d [DISKS ...]] [--image_temp_dir IMAGE_TEMP_DIR] [--concurrent_downloads CONCURRENT_DOWNLOADS] url
+usage: main.py [-h] [--height HEIGHT] [-d [DISKS ...]] [--image_temp_dir IMAGE_TEMP_DIR] url
 
 Upload caps-a-holic comparison to slow.pics.
 
@@ -13,8 +13,6 @@ options:
                         Additional disks
   --image_temp_dir IMAGE_TEMP_DIR
                         Temporary directory for images
-  --concurrent_downloads CONCURRENT_DOWNLOADS
-                        Number of concurrent downloads
 ```
 
 #### DEMO: https://slow.pics/c/zXvlytMN
